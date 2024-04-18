@@ -153,7 +153,7 @@ class CompleteGraph(Graph):
 
         all_nodes = list(range(node_size))
         # byzantine_nodes = [1, 3, 5, 7]
-        byzantine_nodes = []
+        byzantine_nodes = [0]
         honest_nodes = [node for node in all_nodes if node not in byzantine_nodes]
 
         assert byzantine_size == len(byzantine_nodes)

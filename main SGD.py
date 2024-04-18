@@ -1,19 +1,20 @@
 from argsParser import args
+import numpy as np
 
-from ByrdLab import FEATURE_TYPE
+from ByrdLab import FEATURE_TYPE, DEVICE
 from ByrdLab.attack import (D_alie, D_gaussian, D_isolation_weight,
                             D_sample_duplicate, D_sign_flipping,
                             D_zero_sum, D_zero_value, D_label_flipping, D_label_random, D_feature_label_random, D_furthest_label_flipping)
 from ByrdLab.SingleMachineAlgorithm import SGD
 from ByrdLab.graph import CompleteGraph, ErdosRenyi, OctopusGraph, TwoCastle
 from ByrdLab.library.cache_io import dump_file_in_cache, dump_model_in_cache
-from ByrdLab.library.dataset import ijcnn, mnist, fashionmnist, cifar10
+from ByrdLab.library.dataset import ijcnn, mnist, fashionmnist, cifar10, mnist_sorted_by_labels
 from ByrdLab.library.learnRateController import ladder_lr, one_over_sqrt_k_lr
 from ByrdLab.library.partition import (LabelSeperation, TrivalPartition,
                                    iidPartition)
 from ByrdLab.library.tool import log
 from ByrdLab.tasks.logisticRegression import LogisticRegressionTask
-from ByrdLab.tasks.softmaxRegression import softmaxRegressionTask
+from ByrdLab.tasks.softmaxRegression import softmaxRegressionTask, softmax_regression_loss
 from ByrdLab.tasks.leastSquare import LeastSquareToySet, LeastSquareToyTask
 from ByrdLab.tasks.neuralNetwork import NeuralNetworkTask
 
@@ -47,7 +48,8 @@ if args.attack == 'none':
 
 # dataset = ToySet(set_size=500, dimension=5, fix_seed=True)
 
-data_package = mnist()
+# data_package = mnist()
+data_package = mnist_sorted_by_labels()
 task = softmaxRegressionTask(data_package)
 
 # data_package = fashionmnist()
@@ -93,14 +95,8 @@ else:
 # -------------------------------------------
 # define data partition
 # -------------------------------------------
-if args.data_partition == 'trival':
-    partition_cls = TrivalPartition
-elif args.data_partition == 'iid':
-    partition_cls = iidPartition
-elif args.data_partition == 'noniid':
-    partition_cls = LabelSeperation
-else:
-    assert False, 'unknown data-partition'
+partition_cls = TrivalPartition
+
 # ===========================================
     
 
@@ -177,7 +173,7 @@ if mark_on_title != '':
     title = title + '_' + mark_on_title
 title = title + '.pt'
 
-data_package = task.data_package
+# data_package = task.data_package
 super_params = task.super_params
 
 # print the running information
@@ -187,7 +183,7 @@ print('=========================================================')
 print('[Setting]')
 print('{:12s} model={}'.format('[task]', task.model_name))
 print('{:12s} dataset={} partition={}'.format(
-    '[dataset]', data_package.name, env.partition_name))
+    '[dataset]', task.data_package.name, env.partition_name))
 print('{:12s} name={} aggregation={} attack={}'.format(
     '[Algorithm]', env.name, 'None', attack_name))
 print('{:12s} lr={} lr_ctrl={}, weight_decay={}'.format(
@@ -201,9 +197,28 @@ print('{:12s} record_in_file={}'.format('[System]', record_in_file))
 print('-------------------------------------------')
 
 log('[Start Running]')
-avg_model, loss_path, acc_path, consensus_error_path = env.run()
-path_best_list = [task.name, graph.name, env.partition_name] + workspace
-dump_model_in_cache(title, avg_model, path_list=path_best_list)
+data_size = len(data_package.train_set)
+num_classes = data_package.num_classes
+len_U = data_size * num_classes 
+loss_clean_model = np.zeros(len_U)
+
+model = env.run()
+path_best_list = [task.name, graph.name, 'TrivalPartition'] + workspace
+dump_file_in_cache('SGD_momentum_invSqrtLR.pt', model, path_list=path_best_list)
+
+loss_fn = softmax_regression_loss
+for i in range(data_size):
+    feature = data_package.train_set.features[i]
+    target = data_package.train_set.targets[i]
+    feature = feature.to(DEVICE)
+    target = target.to(DEVICE)
+    prediction = model(feature)
+    for k in range(num_classes):
+        target_flipped = (target + k) % num_classes
+        loss_clean_model[i + k * data_size] = loss_fn(prediction, target_flipped)
+
+path_best_list = [task.name, graph.name, 'TrivalPartition'] + workspace
+dump_file_in_cache('loss_best_model_on_each_sample', loss_clean_model, path_list=path_best_list)
 
 # record = {
 #     'dataset': data_package.name,

@@ -1,5 +1,7 @@
 from ByrdLab.library.RandomNumberGenerator import RngPackage
 from ByrdLab.library.dataset import DataPackage, StackedDataSet
+import numpy as np
+import matplotlib.pyplot as plt
 
 class Partition():
     def __init__(self, name, partition, rng_pack: RngPackage=RngPackage()):
@@ -53,6 +55,169 @@ class TrivalPartition(HorizotalPartition):
         partition = [list(range(seperation[i], seperation[i+1]))
                                 for i in range(node_cnt)]
         super().__init__('TrivalDist', partition)
+
+class DirichletPartition(HorizotalPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage(), alpha=0.1, min_size=10):
+        self.dataset = dataset
+        self.node_cnt = node_cnt
+        self.alpha = alpha
+        self.min_size = min_size
+        # self.min_size = len(dataset) // node_cnt
+        self.rng_pack = rng_pack
+
+        # Get the label set and label number
+        self.class_set = set([label.item() for _, label in dataset])
+        self.class_cnt = len(self.class_set)
+
+        # deal with the situation that class idx don't
+        # locate in consecutive integers starting from zeros
+        self.class_idx_dict = {
+            label: idx for idx, label in enumerate(self.class_set)}
+
+        partition = self.non_iid_dirichlet()
+        super(DirichletPartition, self).__init__(f'DirichletPartition_alpha={alpha}', partition)
+        self.data_distribution = self.get_data_distribution()
+
+    def non_iid_dirichlet(self):
+        """Partition dataset into multiple clients following the Dirichlet process.
+
+        Key parameters:
+            alpha (float): The parameter for Dirichlet process simulation.
+            min_size (int): The minimum number of data size of a client.
+
+        Return:
+            list[list[]]: The partitioned data.
+        """
+        np.random.seed(seed=1)
+
+        current_min_size = 0
+        data_size = len(self.dataset)
+
+        all_index = [[] for _ in range(self.class_cnt)]
+        for i, (_, label) in enumerate(self.dataset):
+            # get indexes for all data with current label i at index i in all_index
+            label = self.class_idx_dict[label.item()]
+            all_index[label].append(i)
+
+        partition = [[] for _ in range(self.node_cnt)]
+        while current_min_size < self.min_size:
+            partition = [[] for _ in range(self.node_cnt)]
+            for k in range(self.class_cnt):
+                idx_k = all_index[k]
+                self.rng_pack.random.shuffle(idx_k)
+                proportions = np.random.dirichlet(np.repeat(self.alpha, self.node_cnt))
+                # using the proportions from dirichlet, only select those nodes having data amount less than average
+                proportions = np.array(
+                    [p * (len(idx_j) < data_size / self.node_cnt) for p, idx_j in zip(proportions, partition)])
+                # scale proportions
+                proportions = proportions / proportions.sum()
+                proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
+                partition = [idx_j + idx.tolist() for idx_j, idx in zip(partition, np.split(idx_k, proportions))]
+                current_min_size = min([len(idx_j) for idx_j in partition])
+        return partition
+    
+    def get_data_distribution(self):
+        data_distribution = []
+        for x in range(self.node_cnt):
+            class_cnt_dict = {label: 0 for label in self.class_set}
+            for j in self.partition[x]:
+                class_cnt_dict[self.dataset[j][1].item()] += 1
+            data_distribution.append(class_cnt_dict)
+        return data_distribution
+    
+    def draw_data_distribution(self):
+        """
+        Draw data distributions for all nodes,
+        showing the distribution of data categories for each node through cumulative bar charts.
+        """
+        labels = [i for i in range(1, len(self.partition) + 1)]
+        class_list = sorted(list(set([label.item() for _, label in self.dataset])))
+        class_cnt = len(class_list)
+        data = [[] for _ in range(class_cnt)]
+
+        for j in class_list:
+            data[j] = np.array([x[j] if x.get(j) else 0 for x in self.data_distribution])
+        sum_data = sum(data)
+        y_max = max(sum_data)
+        x = range(len(labels))
+        width = 0.35
+
+        # Initialize bottom_y element 0
+        bottom_y = np.array([0] * len(labels))
+
+        fig, ax = plt.subplots()
+        for i, y in enumerate(data):
+            ax.bar(x, y, width, bottom=bottom_y, label=class_list[i])
+            bottom_y = bottom_y + y
+
+        # Add Legend
+        plt.legend(bbox_to_anchor=(1.05, 0), loc=3, borderaxespad=0)
+
+        for a, b, i in zip(x, sum_data, range(len(x))):
+            plt.text(a, int(b * 1.03), "%d" % sum_data[i], ha='center')
+
+        # Setting the title and axis labels
+        ax.set_title(self.name + ' data distribution')
+        ax.set_xlabel('Nodes')
+        ax.set_ylabel('Sample number')
+        plt.xticks(x)
+
+        # Adjust chart layout to prevent annotations from obscuring chart content
+        plt.tight_layout()
+
+        plt.grid(True, linestyle=':', alpha=0.6)
+        # Adjust the length of the vertical coordinate
+        plt.ylim(0, int(y_max * 1.1))
+
+        # show picture
+        plt.savefig(f'dirichlet_alpha={self.alpha}.pdf')
+        plt.show()
+
+
+class DirichletIiiPartition(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=100)
+
+
+class DirichletMildPartition(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1)
+
+
+class DirichletNoniidPartition(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=0.01)
+
+class DirichletPartition_0(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1000)
+
+class DirichletPartition_a(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=100)
+
+
+class DirichletPartition_b(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=10)
+
+
+class DirichletPartition_c(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1)
+
+class DirichletPartition_d(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1e-1, min_size=3000)
+
+
+class DirichletPartition_e(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1e-2, min_size=4000)
+
+class DirichletPartition_f(DirichletPartition):
+    def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()):
+        super().__init__(dataset, node_cnt, rng_pack, alpha=1e-3, min_size=4000)
 
 class iidPartition(HorizotalPartition):
     def __init__(self, dataset, node_cnt, rng_pack: RngPackage=RngPackage()) -> None:

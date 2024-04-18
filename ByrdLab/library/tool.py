@@ -96,4 +96,39 @@ def naive_local_avg(graph):
                 continue
             W[i][j] = 1 / neigbor_size
     return W
+
+def flatten_model(model):
+    return torch.cat([p.flatten() for p in model.parameters()])
+
+
+def flatten_vector(parameters):
+    return torch.cat([p.flatten() for p in parameters])
+
+
+def flatten_list(message):
+    """
+    Flatten matrix into vector
+
+    :param message: the gradients from the workers, type:matrix
+    """
+    wList = [torch.cat([p.flatten() for p in parameters]) for parameters in message]
+    wList = torch.stack(wList)  # This code will increase the memory if the aggregation is cc
+    return wList
+
+
+def unflatten_vector(vector, model):
+    """
+    Unflatten vector into matrix which has same size as model parameters
+
+    :param vector: the flattened gradients from the workers, type:vector
+    :param model: the global model
+    :return:
+    """
+    paraGroup = []
+    cum = 0
+    for p in model.parameters():
+        newP = vector[cum:cum+p.numel()]
+        paraGroup.append(newP.view_as(p))
+        cum += p.numel()
+    return paraGroup
     

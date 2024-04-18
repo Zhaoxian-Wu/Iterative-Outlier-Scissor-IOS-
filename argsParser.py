@@ -17,6 +17,7 @@ parser.add_argument('--without-record', action='store_true',
                     help='If specifed, no file of running record and log will be left')
 parser.add_argument('--step-agg', type=int, default=1)
 parser.add_argument('--gpu', type=int, default=0)
+parser.add_argument('--prob', type=float, default=1.0)
 
 args = parser.parse_args()
 gpu = args.gpu

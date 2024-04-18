@@ -4,7 +4,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import ResNet18_Weights
+# from torchvision.models import ResNet18_Weights
 from ByrdLab.library.RandomNumberGenerator import RngPackage
 from ByrdLab.library.dataset import DataPackage
 
@@ -31,6 +31,42 @@ class CNNModel(torch.nn.Module):
         x = self.fc2(x)
         # x = F.log_softmax(x, dim=1)
         return x
+    
+
+# 模型:两层MLP
+class MLP(nn.Module):
+    """
+    Inputs                                 Linear/Function                               Output
+    [batch_size, 1, 28, 28]          -> Linear(28*28, hidden_size1)          -> [batch_size, hidden_size1]  # first hidden layer
+                                     -> Tanh                                 -> [batch_size, hidden_size1]  # tanh activation function, may sigmoid
+                                     -> Linear(hidden_size1, hidden_size2)   -> [batch_size, hidden_size2]  # second hidden layer
+                                     -> Tanh                                 -> [batch_size, hidden_size2]  # tanh activation function, may sigmoid
+                                     -> Linear(hidden_size2, 10)             -> [batch_size, 10]  # Classification Layer
+   """
+
+    def __init__(self, num_classes=10):
+        super(MLP, self).__init__()
+        self.hidden1 = nn.Linear(784, 50)
+        self.hidden2 = nn.Linear(50, 50)
+        self.classification_layer = nn.Linear(50, num_classes)
+        # self.tanh1 = nn.Tanh()
+        # self.tanh2 = nn.Tanh()
+
+    def forward(self, x):
+        """
+        :param x: [batch_size, channel, height, width], input for network
+        :return: [batch_size, n_classes], output from network
+        """
+        out = x.view(x.size(0), -1)  # flatten x in [batch_size, dimensions]
+        out = self.hidden1(out)
+        # out = self.tanh1(out)
+        out = F.relu(out)
+        out = self.hidden2(out)
+        # out = self.tanh2(out)
+        out = F.relu(out)
+        out = self.classification_layer(out)
+        # out = F.log_softmax(out, dim=1)
+        return out
     
 
 # VGG11/13/16/19 in Pytorch
@@ -100,6 +136,7 @@ class NeuralNetworkTask(Task):
         weight_decay = 0.0085
         # model = VGG('VGG11', data_package.num_classes)
         model = CNNModel(data_package.num_classes)
+        # model = MLP(data_package.num_classes)
 
         # from torchvision.models import resnet18
         # model = resnet18(weights=ResNet18_Weights.DEFAULT)
@@ -120,6 +157,7 @@ class NeuralNetworkTask(Task):
             'batch_size': batch_size,
             'test_batch_size': 10000,
             'lr': 1e-2,
+            'alpha':0.1,
         }
 
         test_set = data_package.test_set

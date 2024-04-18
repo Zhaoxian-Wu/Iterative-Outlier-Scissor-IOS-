@@ -178,7 +178,7 @@ def avg_loss_accuracy_dist_1(dist_models, get_test_iter,
 
 
 @torch.no_grad()
-def one_node_loss_accuracy_dist(dist_models, get_test_iter,
+def one_node_loss_accuracy_dist(model, get_test_iter,
                            loss_fn, test_fn, weight_decay,
                            node_list=None):
     '''
@@ -190,15 +190,7 @@ def one_node_loss_accuracy_dist(dist_models, get_test_iter,
     total_sample = 0
     
     # evaluation
-    # dist_models.activate_avg_model()
-    if node_list is None:
-        node_list = range(dist_models.node_size)
-
     with torch.no_grad():
-        node = node_list[0]
-        print(f'node: {node}')
-        dist_models.activate_model(node)
-        model = dist_models.model
         model.eval()
         test_iter = get_test_iter()
         for features, targets in test_iter:

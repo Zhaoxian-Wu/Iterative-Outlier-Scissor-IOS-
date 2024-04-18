@@ -341,14 +341,16 @@ class DSGD_MSG_under_DPA(Dec_Byz_Opt_Env):
                 loss = self.loss_fn(predictions, targets)
                 # model.zero_grad()
                 loss.backward()
-                
+                grad_norm = 0
+
                 # gradient descend
                 with torch.no_grad():
                     for param in model.parameters():
                         if param.grad is not None:
+                            # grad_norm += torch.norm(param.grad)
                             param.data.mul_(1 - self.weight_decay * lr)
                             param.data.sub_(param.grad, alpha=lr)
-            
+                
                             
             # communication and attack
             self.aggregation.global_state['lr'] = lr
@@ -359,6 +361,7 @@ class DSGD_MSG_under_DPA(Dec_Byz_Opt_Env):
                 for node in self.nodes:
                     # aggregation
                     aggregation_res = self.aggregation.run(param_bf_comm, node)
+                    # print(f'{iteration}-th iteration norm:{torch.norm(aggregation_res - param_bf_comm) / lr}')
                     dist_models.params_vec[node].copy_(aggregation_res)
                 
         dist_models.activate_avg_model()

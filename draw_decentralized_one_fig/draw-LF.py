@@ -27,8 +27,8 @@ parser.add_argument('--portrait', action='store_true',
 
 args = parser.parse_args()
 
-args.task = 'NeuralNetwork_cifar10'
-args.graph = 'Complete_n=20_b=4'
+args.task = 'SR_mnist_sorted_by_label'
+args.graph = 'Complete_n=10_b=1'
 args.partition = 'LabelSeperation'
 # args.partition = 'iidPartition'
 args.portrait = True
@@ -54,12 +54,12 @@ FONT_SIZE = 14
 LINE_STYLE = '-'
 # LINE_STYLE = 'v-'
 
-pic_name = 'dec_' + task_name + '_' + graph_name + '_' + partition_name + '_labelflipping'
+pic_name = 'dec_' + task_name + '_' + graph_name + '_' + partition_name + '_adversariallabelflipping'
 
 colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
 aggregations = [
-    ('meanW', 'Mean (without attack)'),
+    # ('meanW', 'Mean (without attack)'),
     # ('geometric_median', 'GeoMed'), 
     # ('median', 'CooMed'),
     # ('Krum', 'Krum'), 
@@ -80,7 +80,8 @@ attackNames = [
     # ('gaussian', 'Gaussian attack'), 
     # ('sign_flipping', 'sign flipping attack'), 
     # ('isolation', 'isolation attack'),
-    ('label_flipping', 'label flipping attack')
+    # ('label_flipping', 'label flipping attack'),
+    ('adversarial_label_flipping', 'adversarial label flipping attack')
 ]
 
 # ====== create axis ======
@@ -181,10 +182,10 @@ for attack_code_name, attack_show_name in attackNames:
         # file_name = 'DSGD_MSG_' + attack_code_name + '_' + agg_code_name \
         #     + '_invSqrtLR' + mark_on_title
         if agg_show_name == 'Mean (without attack)':
-            file_name = 'DSGD_MSG_baseline_' + agg_code_name + '_ladderLR' + mark_on_title
+            file_name = 'DSGD_MSG_baseline_' + agg_code_name + '_invSqrtLR' + mark_on_title
         else: 
             file_name = 'DSGD_MSG_' + attack_code_name + '_' + agg_code_name \
-                        + '_ladderLR' + mark_on_title
+                        + '_invSqrtLR' + mark_on_title
         file_path = [task_name, graph_name, partition_name] + workspace
         record = load_file_in_cache(file_name, path_list=file_path)
         loss_path = record['loss_path']

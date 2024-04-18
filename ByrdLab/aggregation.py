@@ -1,20 +1,22 @@
 import copy
 import itertools
 import math
-
+import sklearn.metrics.pairwise as smp
+from sklearn.cluster import KMeans
+import numpy as np
 import torch
 from ByrdLab import FEATURE_TYPE, DEVICE
 from scipy import stats
 
-from ByrdLab.library.tool import MH_rule
+from ByrdLab.library.tool import MH_rule, flatten_list, unflatten_vector
 
-# class aggregation():
-#     def __init__(self, name, honest_size, byzantine_size):
-#         self.name = name
-#         self.honest_size = honest_size
-#         self.byzantine_size = byzantine_size
-#     def run(self, messages):
-#         raise NotImplementedError
+class CentraliedAggregation():
+    def __init__(self, name, honest_nodes, byzantine_nodes):
+        self.name = name
+        self.honest_nodes = honest_nodes
+        self.byzantine_nodes = byzantine_nodes
+    def run(self, messages):
+        raise NotImplementedError
 
 
 def mean(wList):
@@ -234,6 +236,138 @@ def bulyan(wList, byzantine_size):
         result = torch.stack([
             selection[indices[:, d], d].mean() for d in range(wList.size(1))])
     return result
+
+
+class C_mean(CentraliedAggregation):
+    def __init__(self, honest_nodes, byzantine_nodes):
+        super().__init__(name='mean', honest_nodes=honest_nodes, byzantine_nodes=byzantine_nodes)
+
+    def run(self, messages):
+        return torch.mean(messages, dim=0)
+
+
+class C_trimmed_mean(CentraliedAggregation):
+    def __init__(self, honest_nodes, byzantine_nodes):
+        super().__init__(name='trimmed_mean', honest_nodes=honest_nodes, byzantine_nodes=byzantine_nodes)
+
+    def run(self, messages):
+        # 将张量按某个维度排序
+        sorted_wList, _ = torch.sort(messages, dim=0)
+        byzantine_size = len(self.byzantine_nodes)
+
+        # 对排序后的张量进行修剪
+        if byzantine_size == 0:
+            trimmed_data = sorted_wList
+        elif byzantine_size > 0:
+            trimmed_data = sorted_wList[byzantine_size:-byzantine_size, :]
+        else:
+            assert False, 'Byzantine size should be equal or larger than 0!'
+        
+        # 计算修剪后的均值
+        if trimmed_data.nelement() > 0:
+            tm = torch.mean(trimmed_data, dim=0)
+        else:
+            tm = 0
+    
+        return tm
+
+
+class C_faba(CentraliedAggregation):
+    def __init__(self, honest_nodes, byzantine_nodes):
+        super().__init__(name='faba', honest_nodes=honest_nodes, byzantine_nodes=byzantine_nodes)
+
+    def run(self, messages):
+        remain = messages
+        byzantine_size = len(self.byzantine_nodes)
+
+        for _ in range(byzantine_size):
+            mean = torch.mean(remain, dim=0)
+            # remove the largest 'byzantine_size' model
+            distances = torch.tensor([
+                torch.norm(model - mean) for model in remain
+            ])
+            remove_index = distances.argmax()
+            remain = remain[torch.arange(remain.size(0)) != remove_index]
+        return remain.mean(dim=0)
+
+
+class C_centered_clipping(CentraliedAggregation):
+    def __init__(self, honest_nodes, byzantine_nodes, threshold=10):
+        super().__init__(name=f'CC_tau={threshold}', honest_nodes=honest_nodes, byzantine_nodes=byzantine_nodes)
+        self.memory = None
+        self.threshold = threshold
+
+    def run(self, messages):
+        if self.memory == None:
+            self.memory = torch.zeros_like(messages[0])
+        
+        diff = torch.zeros_like(self.memory)
+        for n in self.honest_nodes + self.byzantine_nodes:
+            grad = messages[n]
+            norm = (grad - self.memory).norm()
+            if norm > self.threshold:
+                diff += self.threshold * (grad - self.memory) / norm
+            else:
+                diff += grad - self.memory
+        diff /= (len(self.honest_nodes) + len(self.byzantine_nodes))
+        self.memory = self.memory + diff
+        return self.memory
+    
+
+class C_LFighter(CentraliedAggregation):
+    def __init__(self, honest_nodes, byzantine_nodes):
+        super().__init__('LFighter', honest_nodes, byzantine_nodes)
+
+    def clusters_dissimilarity(self, clusters):
+        n0 = len(clusters[0])
+        n1 = len(clusters[1])
+        m = n0 + n1 
+        cs0 = smp.cosine_similarity(clusters[0]) - np.eye(n0)
+        cs1 = smp.cosine_similarity(clusters[1]) - np.eye(n1)
+        mincs0 = np.min(cs0, axis=1)
+        mincs1 = np.min(cs1, axis=1)
+        ds0 = n0/m * (1 - np.mean(mincs0))
+        ds1 = n1/m * (1 - np.mean(mincs1))
+        return ds0, ds1
+
+    def run(self, messages):
+        m = len(messages)
+        dw = [[] for _ in range(m)]
+        for i in range(m):
+            dw[i].append(messages[i][-2].cpu().data.numpy())
+        dw = np.asarray(dw)
+        dw = np.squeeze(dw)
+        norms = np.linalg.norm(dw, axis=-1)
+        memory = np.sum(norms, axis=0)
+        max_two_freq_classes = memory.argsort()[-2:]
+        # print('Potential source and target classes:', max_two_freq_classes)
+        data = []
+        for i in range(m):
+            data.append(dw[i][max_two_freq_classes].reshape(-1))
+
+        kmeans = KMeans(n_clusters=2, random_state=0, n_init='auto').fit(data)
+        labels = kmeans.labels_
+
+        clusters = {0:[], 1: []}
+        for i, l in enumerate(labels):
+            clusters[l].append(data[i])
+
+        good_cl = 0
+        cs0, cs1 = self.clusters_dissimilarity(clusters)
+        if cs0 < cs1:
+            good_cl = 1
+        
+        remain_worker_grad = []
+        for i, l in enumerate(labels):
+            if l == good_cl:
+                remain_worker_grad.append(messages[i])
+        
+        mean = [torch.zeros_like(para, requires_grad=False) for para in messages[0]]
+        for grad in remain_worker_grad:
+            for i, g in enumerate(grad):
+                mean[i].add_(g, alpha=1 / len(remain_worker_grad))
+
+        return mean
 
 
 class DecentralizedAggregation():
@@ -522,6 +656,7 @@ class D_centered_clipping(DecentralizedAggregation):
     def run(self, local_models, node):
         if self.memory == None:
             self.memory = torch.zeros_like(local_models)
+        
         diff = torch.zeros_like(self.memory[node])
         for n in self.graph.neighbors[node] + [node]:
             model = local_models[n]

@@ -55,12 +55,13 @@ class softmaxRegressionTask(Task):
         test_fn = multi_classification_accuracy
         
         super_params = {
-            'rounds': 100,
-            'display_interval': 500,
+            'rounds': 200,
+            'display_interval': 100,
             'batch_size': batch_size,
             # 'test_batch_size': 900,
             'test_batch_size': 10000,
-            'lr': 9e-2,
+            'lr': 1e-2,
+            'alpha': 0.1,
         }
         
         test_set = data_package.test_set

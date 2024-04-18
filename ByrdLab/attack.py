@@ -10,24 +10,24 @@ from ByrdLab.library.tool import MH_rule
 
 def gaussian(messages, honest_nodes, byzantine_nodes, scale, torch_rng=None):
     # with the same mean and larger variance
-    mu = torch.zeros(messages.size(1), dtype=FEATURE_TYPE)
+    mu = torch.zeros(messages.size(1), dtype=FEATURE_TYPE).to(DEVICE)
     for node in honest_nodes:
         mu.add_(messages[node], alpha=1/len(honest_nodes))
     for node in byzantine_nodes:
         messages[node].copy_(mu)
         noise = torch.randn(messages.size(1), dtype=FEATURE_TYPE,
-                            generator=torch_rng)
-        messages[node].add_(noise, alpha=scale)
+                            generator=torch_rng).to(DEVICE)
+        messages[node].add_(noise, alpha=10000)
     
 def sign_flipping(messages, honest_nodes, byzantine_nodes, scale,
                   noise_scale=0, torch_rng=None):
-    mu = torch.zeros(messages.size(1), dtype=FEATURE_TYPE)
+    mu = torch.zeros(messages.size(1), dtype=FEATURE_TYPE).to(DEVICE)
     for node in honest_nodes:
         mu.add_(messages[node], alpha=1/len(honest_nodes))
     melicious_message = -scale * mu
     for node in byzantine_nodes:
         noise = torch.randn(messages.size(1), dtype=FEATURE_TYPE,
-                            generator=torch_rng)
+                            generator=torch_rng).to(DEVICE)
         messages[node].copy_(melicious_message)
         messages[node].add_(noise, alpha=noise_scale)
              
@@ -89,6 +89,7 @@ class CentralizedAttackWrapper(CentralizedAttack):
                          byzantine_nodes=byzantine_nodes)
         self.kw = kw
         self.attack_fn = attack_fn
+        
     def run(self, messages):
         self.attack_fn(messages, self.honest_nodes, self.byzantine_nodes, **self.kw)
     
@@ -100,7 +101,7 @@ class C_gaussian(CentralizedAttackWrapper):
         self.scale = scale
             
 class C_sign_flipping(CentralizedAttackWrapper):
-    def __init__(self, honest_nodes, byzantine_nodes, scale=3, noise_scale=0):
+    def __init__(self, honest_nodes, byzantine_nodes, scale=100, noise_scale=0):
         super().__init__(name='sign_flipping', honest_nodes=honest_nodes, 
                          byzantine_nodes=byzantine_nodes, 
                          attack_fn=sign_flipping, scale=scale,
@@ -303,62 +304,74 @@ class D_alie(decentralizedAttack):
             local_models[n].copy_(melicious_message)
 
 # Data Poisoning Attack
-class decentralizedDataPoisoningAttack():
-    def __init__(self, name, graph):
-        self.graph = graph
+class DataPoisoningAttack():
+    def __init__(self, name):
         self.name = name
-    def run(self, features, targets, rng_pack: RngPackage=RngPackage(), model=None):
+
+    def run(self, features, targets, model=None, rng_pack: RngPackage=RngPackage(),):
         raise NotImplementedError
 
         
-class D_label_flipping(decentralizedDataPoisoningAttack):
+class label_flipping(DataPoisoningAttack):
 
-    def __init__(self, graph):
-        super().__init__(name='label_flipping', graph=graph)
+    def __init__(self):
+        super().__init__(name='label_flipping')
     
     def run(self, features, targets, model=None, rng_pack: RngPackage = RngPackage()):
         features = features
-        # targets = 9 - targets
-        # targets = 9 - targets
-        for i in range(len(targets)):
-            if targets[i] == 0:
-                targets[i] = 2
-            elif targets[i] == 1:
-                targets[i] = 9
-            elif targets[i] == 5:
-                targets[i] = 3 
+        targets = 9 - targets
+        # for i in range(len(targets)):
+        #     if targets[i] == 0:
+        #         targets[i] = 2
+        #     elif targets[i] == 1:
+        #         targets[i] = 9
+        #     elif targets[i] == 5:
+        #         targets[i] = 3 
         return features, targets
     
-class D_label_random(decentralizedDataPoisoningAttack):
+class label_random(DataPoisoningAttack):
 
-    def __init__(self, graph):
-        super().__init__(name='label_random', graph=graph)
+    def __init__(self):
+        super().__init__(name='label_random')
 
     def run(self, features, targets, model=None, rng_pack: RngPackage = RngPackage()):
         features = features
         targets = torch.randint(0, 9, size=targets.shape, generator=rng_pack.torch)
         return features, targets
     
-class D_feature_label_random(decentralizedDataPoisoningAttack):
+class feature_label_random(DataPoisoningAttack):
 
-    def __init__(self, graph):
-        super().__init__(name='feature_label_random', graph=graph)
+    def __init__(self):
+        super().__init__(name='feature_label_random')
 
     def run(self, features, targets, model=None, rng_pack: RngPackage = RngPackage()):
         features = 2 * torch.rand(size=features.shape, generator=rng_pack.torch, dtype=FEATURE_TYPE) - 1
         targets = torch.randint(0, 9, size=targets.shape, generator=rng_pack.torch)
         return features, targets
     
-class D_furthest_label_flipping(decentralizedDataPoisoningAttack):
+class furthest_label_flipping(DataPoisoningAttack):
 
-    def __init__(self, graph):
-        super().__init__(name='furthest_label_flipping', graph=graph)
+    def __init__(self):
+        super().__init__(name='furthest_label_flipping')
 
     def run(self, features, targets, model=None, rng_pack: RngPackage = RngPackage()):
-        size = int(len(targets) / 10)
-        for feature, target in zip(features, targets):
-            feature = feature.view(feature.size(0), -1).squeeze().clone()
-            distance = torch.mv(model.linear.weight.data, feature) + model.linear.bias.data
-            _, prediction_cls = torch.max(distance, dim=0)
-            target = prediction_cls
+        data_size = len(targets)
+        for i in range(data_size):
+            feature = features[i].clone().to(DEVICE)
+            # feature = feature.view(feature.size(0), -1).squeeze().clone()
+            # distance = torch.mv(model.linear.weight.data, feature) + model.linear.bias.data
+            distance = model(feature).squeeze()
+            _, prediction_cls = torch.min(distance, dim=0)
+            targets[i] = prediction_cls
+        return features, targets
+    
+
+class adversarial_label_flipping(DataPoisoningAttack):
+
+    def __init__(self):
+        super().__init__(name='adversarial_label_flipping')
+
+    def run(self, features, targets, model= None, rng_pack: RngPackage = RngPackage()):
+        features = features
+        targets = targets
         return features, targets

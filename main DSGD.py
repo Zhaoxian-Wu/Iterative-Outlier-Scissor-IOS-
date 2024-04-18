@@ -8,11 +8,11 @@ from ByrdLab.aggregation import (D_bulyan, D_faba, D_geometric_median, D_Krum,
                                  D_mKrum, D_centered_clipping, D_ios, D_brute, D_mean)
 from ByrdLab.attack import (D_alie, D_gaussian, D_isolation_weight,
                             D_sample_duplicate, D_sign_flipping,
-                            D_zero_sum, D_zero_value, D_label_flipping, D_label_random, D_feature_label_random, D_furthest_label_flipping)
+                            D_zero_sum, D_zero_value, label_flipping, label_random, feature_label_random, furthest_label_flipping, adversarial_label_flipping)
 from ByrdLab.decentralizedAlgorithm import DSGD, DSGD_MSG, DSGD_MSG_under_DPA
 from ByrdLab.graph import CompleteGraph, ErdosRenyi, OctopusGraph, TwoCastle, LineGraph, RandomGeometricGraph
-from ByrdLab.library.cache_io import dump_file_in_cache
-from ByrdLab.library.dataset import ijcnn, mnist, fashionmnist, cifar10
+from ByrdLab.library.cache_io import dump_file_in_cache, load_file_in_cache
+from ByrdLab.library.dataset import ijcnn, mnist, fashionmnist, cifar10, mnist_sorted_by_labels
 from ByrdLab.library.learnRateController import ladder_lr, one_over_sqrt_k_lr
 from ByrdLab.library.partition import (LabelSeperation, TrivalPartition,
                                    iidPartition)
@@ -47,8 +47,8 @@ from ByrdLab.tasks.neuralNetwork import NeuralNetworkTask
 
 args.graph = 'CompleteGraph'
 # args.attack = 'label_flipping'
-args.lr_ctrl = 'ladder'
-args.data_partition = 'noniid'
+# args.lr_ctrl = 'ladder'
+# args.data_partition = 'trival'
 # args.aggregation = 'ios' 
 
 # run for decentralized algorithm
@@ -56,7 +56,7 @@ args.data_partition = 'noniid'
 # define graph
 # -------------------------------------------
 if args.graph == 'CompleteGraph':
-    graph = CompleteGraph(node_size=10, byzantine_size=0)
+    graph = CompleteGraph(node_size=10, byzantine_size=1)
 elif args.graph == 'TwoCastle':
     graph = TwoCastle(k=6, byzantine_size=2, seed=40)
 elif args.graph == 'ER':
@@ -92,13 +92,17 @@ if args.attack == 'none':
 # dataset = ToySet(set_size=500, dimension=5, fix_seed=True)
 
 # data_package = mnist()
-# task = softmaxRegressionTask(data_package)
+# task = softmaxRegressionTask(data_package, batch_size=32)
 
 # data_package = fashionmnist()
 # task = softmaxRegressionTask(data_package)
 
-data_package = cifar10()
+# data_package = cifar10()
+# task = NeuralNetworkTask(data_package, batch_size=32)
+
+data_package = mnist()
 task = NeuralNetworkTask(data_package, batch_size=32)
+
 
 # w_star = torch.tensor([1], dtype=FEATURE_TYPE)
 # data_package = LeastSquareToySet(set_size=2000, dimension=1, w_star=w_star, noise=0, fix_seed=True)
@@ -219,6 +223,42 @@ elif args.attack == 'feature_label_random':
     attack = D_feature_label_random(graph)
 elif args.attack == 'furthest_label_flipping':
     attack = D_furthest_label_flipping(graph)
+elif args.attack == 'adversarial_label_flipping_iid':
+    attack = D_adversarial_label_flipping(graph)
+
+    path = ['SR_mnist', 'Complete_n=1_b=0', 'TrivalPartition', 'best']
+    q = load_file_in_cache('q-end', path_list=path)
+    data_size = len(data_package.train_set)
+    num_classes = data_package.num_classes
+    len_q = num_classes * data_size
+    assert len(q) == len_q
+
+    for i in range(len_q):
+        if q[i] == 1:
+            k = i // data_size
+            index = i % data_size
+            task.data_package.train_set.targets[index] = (task.data_package.train_set.targets[index] + k) % num_classes
+
+elif args.attack == 'adversarial_label_flipping_noniid':
+    attack = D_adversarial_label_flipping(graph)
+    data_package = mnist_sorted_by_labels()
+    task = softmaxRegressionTask(data_package)
+    partition_cls = LabelSeperation
+
+    path = ['SR_mnist', 'Complete_n=1_b=0', 'LabelSeperation', 'best']
+    q = load_file_in_cache('q-end', path_list=path)
+    ratio = graph.byzantine_size / graph.node_size
+    flipped_data_size = int(ratio * len(data_package.train_set))
+    num_classes = data_package.num_classes
+    len_q = num_classes * flipped_data_size
+    assert len(q) == len_q
+
+    for i in range(len_q):
+        if q[i] == 1:
+            k = i // flipped_data_size
+            index = i % flipped_data_size
+            task.data_package.train_set.targets[index] = (task.data_package.train_set.targets[index] + k) % num_classes
+
 elif args.attack == 'sign_flipping':
     attack = D_sign_flipping(graph)
 elif args.attack == 'gaussian':

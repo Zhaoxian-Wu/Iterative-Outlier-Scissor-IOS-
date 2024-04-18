@@ -226,9 +226,41 @@ def get_mnist():
     return torch_train_dataset, torch_test_dataset
 
 
+def get_mnist_sorted_by_label():
+    from torchvision import transforms
+    from torchvision.datasets import MNIST
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.ConvertImageDtype(dtype=ByrdLab.FEATURE_TYPE),
+        # transforms.Normalize(mean=[0.1307],std=[0.3081])
+        transforms.Normalize(mean=[0.5],std=[0.5])
+        # transforms.Lambda(lambda x: x / 255)
+    ])
+
+    root = 'dataset'
+    torch_train_dataset = MNIST(root=root, train=True,
+                                transform=transform, download=True)
+    torch_test_dataset = MNIST(root=root, train=False,
+                              transform=transform, download=True)
+
+    # 重新排列训练数据集的目标按标签排序
+    sorted_indices = torch.argsort(torch.Tensor(torch_train_dataset.targets))
+    torch_train_dataset.targets = torch_train_dataset.targets[sorted_indices]
+    torch_train_dataset.data = torch_train_dataset.data[sorted_indices]
+
+    return torch_train_dataset, torch_test_dataset
+
+
+
 class mnist(StackedTorchDataPackage):
     def __init__(self):
         super().__init__('mnist', get_mnist)
+
+
+class mnist_sorted_by_labels(StackedTorchDataPackage):
+    def __init__(self):
+        super().__init__('mnist_sorted_by_label', get_mnist_sorted_by_label)
+
 
 
 def get_fashion_mnist():
@@ -351,6 +383,7 @@ class DistributedDataSets_over_honest_and_byz_nodes():
         
         self.partition = partition_cls(dataset, len(nodes),
                                        rng_pack=rng_pack)
+        # self.partition.draw_data_distribution()
         self.subsets = self.partition.get_subsets(dataset)
         pass
     def __getitem__(self, index):
