@@ -64,9 +64,11 @@ python "main CSGD-LFighter.py"   --attack <attack-name> --data-partition <data-p
 # ====================
 # Fig
 ```
-cd draw_decentralized_multi_fig
+cd draw_fig
 
-python draw-MultiFig.py 
+python draw.py 
 
-python draw_A_xi.py 
+python draw_A_xi.py
+
+python draw_alpha_prob.py
 ```
