@@ -382,7 +382,7 @@ class CMomentum_compute_hetero(Dist_Dataset_Opt_Env):
         return server_model, loss_path, acc_path, hetero_list
 
 
-# CSGD under model poisoning attacks
+# CSGD under data poisoning attacks
 class CSGD_under_DPA(Dist_Dataset_Opt_Env):
     def __init__(self, aggregation, honest_nodes, byzantine_nodes, *args, **kw):
         super().__init__(name='CSGD', honest_nodes=honest_nodes, byzantine_nodes=byzantine_nodes,  *args, **kw)
